@@ -4,12 +4,12 @@ This code is mostly based on Dongbin Na's (https://github.com/ndb796) code with 
 
 ### To see the progress so far:
 * Run `basic_training.py` to conventionally train the model with benign data.
-* Run `pgd_adversarial_training.py` to perform PGD training of the model with benign and adversarial data. This code is with an untargeted attack approach.
-* Run `basic_training_test.py` and `pgd_adversarial_training_test.py` once you're done training with `basic_training.py` and `pgd_adversarial_trainng.py` respectively to obtain the benign and adversarial accuracy.
+* Run `pgd_adversarial_training.py` to perform PGD-untargeted training of the model with benign and adversarial data. 
+* Run `pgd_targeted_adversarial_training.py` to perform PGD-targeted training of the model with benign and adversarial data. The adversarial data here is created such that an equal number of images are taken from each class and then each image is misclassified into all the target labels except the true label. A custom DataLoader called `BalancedBatchSampler` has been created for this purpose
+* Run `basic_training_test.py` and `pgd_adversarial_training_test.py` and `pgd_targeted_adversarial_training_test.py` once you're done training with the respective codes to obtain the benign and adversarial accuracy.
 * In addition to this the confusion matrix for benign and adversarial cases was plotted to analyse the classwise distribution of misclassifications when untargeted attacks.
 
 ### Future steps:
-* Perform PGD training with targeted adversarial training using adversarial examples with all target classes except ground truth for each sample.
 * Repeat targeted PGD training considering different norms of robust losses across classes instead of averaging.
 * Analyze class-wise natural and robust accuracies in each scenario.
 

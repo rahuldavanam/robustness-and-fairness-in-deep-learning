@@ -48,7 +48,8 @@ class LinfPGDAttack(object):
     def perturb(self, x_natural, y):  # Perturb - make someone unsettled or anxious
         # Here, care is taken the gradients do not propogate back to x_natural
         x = x_natural.detach()
-        x = x + torch.zeros_like(x).uniform_(-epsilon, epsilon)
+        delta = torch.zeros_like(x).uniform_(-epsilon, epsilon)
+        x = x + delta
         for i in range(k):
             x.requires_grad_()
             with torch.enable_grad():

@@ -48,15 +48,15 @@ class LinfPGDAttack(object):
     def perturb(self, x_natural, y):  # Perturb - make someone unsettled or anxious
         # Here, care is taken the gradients do not propogate back to x_natural
         x = x_natural.detach() 
-        x = x + torch.zeros_like(x).uniform_(-epsilon, epsilon)
+        delta = torch.zeros_like(x).uniform_(-epsilon, epsilon) 
+        x = x + delta
         for i in range(k):
             x.requires_grad_()
             with torch.enable_grad():
                 logits = self.model(x)
                 loss = F.cross_entropy(logits, y)
             grad = torch.autograd.grad(loss, [x])[0] 
-            print(grad)
-            # Note that only the sign is being coonsidered here.
+            # Note that only the sign is being considered here.
             x = x.detach() + alpha * torch.sign(grad.detach())
             x = torch.min(torch.max(x, x_natural - epsilon), x_natural + epsilon)
             x = torch.clamp(x, 0, 1)
@@ -96,7 +96,7 @@ def train(epoch):
         loss.backward()
 
         optimizer.step()
-        # coverts tensor to python number
+        # converts tensor to python number
         train_loss += loss.item()
         # We're interested in the indices where the max value is present along the 1st dimension (along classes)
         _, predicted = adv_outputs.max(1)  

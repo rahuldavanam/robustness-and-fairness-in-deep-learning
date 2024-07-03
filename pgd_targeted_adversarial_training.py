@@ -219,14 +219,15 @@ def adjust_learning_rate(optimizer, epoch):
         lr /= 10
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-        
-start_time = time.time()
 
-for epoch in range(0,20):
-    adjust_learning_rate(optimizer, epoch)
-    train(epoch)
-    test(epoch)
+if __name__ == '__main__':        
+    start_time = time.time()
 
-end_time = time.time() - start_time
+    for epoch in range(0,20):
+        adjust_learning_rate(optimizer, epoch)
+        train(epoch)
+        test(epoch)
 
-print(f"Time taken for 20 epochs = {end_time/3600} hours")
+    end_time = time.time() - start_time
+
+    print(f"Time taken for 20 epochs = {end_time/3600} hours")

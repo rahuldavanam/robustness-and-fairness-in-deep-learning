@@ -77,30 +77,31 @@ def test():
     print('Total benign test loss:', benign_loss)
     print('Total adversarial test loss:', adv_loss)
 
-test()
+if __name__ == '__main__':
+    test()
 
-y_pred_tensor = torch.cat(y_pred).to(device)
-y_pred_adv_tensor = torch.cat(y_pred_adv).to(device)
+    y_pred_tensor = torch.cat(y_pred).to(device)
+    y_pred_adv_tensor = torch.cat(y_pred_adv).to(device)
 
-class_names = test_dataset.classes
-targets_tensor = torch.tensor(test_dataset.targets).to(device)
+    class_names = test_dataset.classes
+    targets_tensor = torch.tensor(test_dataset.targets).to(device)
 
-# Plotting a benign confusion matrix
-confmat = ConfusionMatrix(task='multiclass', num_classes=len(class_names)).to(device)
-confmat_tensor = confmat(preds=y_pred_tensor, target=targets_tensor)
+    # Plotting a benign confusion matrix
+    confmat = ConfusionMatrix(task='multiclass', num_classes=len(class_names)).to(device)
+    confmat_tensor = confmat(preds=y_pred_tensor, target=targets_tensor)
 
-fig, ax = plot_confusion_matrix(
-    conf_mat=confmat_tensor.cpu().numpy(), 
-    class_names=class_names,
-    figsize=(10, 7)
-)
+    fig, ax = plot_confusion_matrix(
+        conf_mat=confmat_tensor.cpu().numpy(), 
+        class_names=class_names,
+        figsize=(10, 7)
+    )
 
-# Plotting an adversarial confusion matrix
-confmat_adv = ConfusionMatrix(task='multiclass', num_classes=len(class_names)).to(device)
-confmat_adv_tensor = confmat_adv(preds=y_pred_adv_tensor, target=targets_tensor)
+    # Plotting an adversarial confusion matrix
+    confmat_adv = ConfusionMatrix(task='multiclass', num_classes=len(class_names)).to(device)
+    confmat_adv_tensor = confmat_adv(preds=y_pred_adv_tensor, target=targets_tensor)
 
-fig, ax = plot_confusion_matrix(
-    conf_mat=confmat_adv_tensor.cpu().numpy(), 
-    class_names=class_names,
-    figsize=(10, 7)
-)
+    fig, ax = plot_confusion_matrix(
+        conf_mat=confmat_adv_tensor.cpu().numpy(), 
+        class_names=class_names,
+        figsize=(10, 7)
+    )

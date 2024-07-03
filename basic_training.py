@@ -166,13 +166,14 @@ def adjust_learning_rate(optimizer, epoch):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-start_time = time.time()
+if __name__ == '__main__':
+    start_time = time.time()
 
-for epoch in tqdm(range(0, 200)):
-    adjust_learning_rate(optimizer, epoch)
-    train(epoch)
-    test(epoch)
+    for epoch in tqdm(range(0, 200)):
+        adjust_learning_rate(optimizer, epoch)
+        train(epoch)
+        test(epoch)
 
-end_time = time.time() - start_time
+    end_time = time.time() - start_time
 
-print(f"Time taken for 200 epochs = {end_time/3600} hours")
+    print(f"Time taken for 200 epochs = {end_time/3600} hours")

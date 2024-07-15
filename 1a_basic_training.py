@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim import lr_scheduler
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 
@@ -9,8 +10,6 @@ import torchvision.transforms as transforms
 
 import os
 import time
-
-from tqdm.auto import tqdm
 
 from models import *
 
@@ -41,6 +40,7 @@ test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False, download
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=4)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False, num_workers=4)
 
+# UNTARGETED TEST DATA
 class LinfPGDAttack(object):
     def __init__(self, model):
         self.model = model
@@ -61,14 +61,7 @@ class LinfPGDAttack(object):
             x = torch.min(torch.max(x, x_natural - epsilon), x_natural + epsilon)
             x = torch.clamp(x, 0, 1)
         return x
-
-def attack(x, y, model, adversary):
-    model_copied = copy.deepcopy(model)
-    model_copied.eval()
-    adversary.model = model_copied
-    adv = adversary.perturb(x, y)
-    return adv
-
+    
 net = ResNet18()
 net = net.to(device)
 net = torch.nn.DataParallel(net)
@@ -77,6 +70,7 @@ cudnn.benchmark = True
 adversary = LinfPGDAttack(net)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=0.9, weight_decay=0.0002)
+scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[17, 32], gamma=0.1)
 
 def train(epoch):
     print('\n[ Train epoch: %d ]' % epoch)
@@ -99,11 +93,12 @@ def train(epoch):
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
         
-        if batch_idx % 10 == 0:
+        if batch_idx % 100 == 0:
             print('\nCurrent batch:', str(batch_idx))
             print('Current benign train accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
             print('Current benign train loss:', loss.item())
-
+            
+    scheduler.step()   
     print('\nTotal benign train accuarcy:', 100. * correct / total)
     print('Total benign train loss:', train_loss)
 
@@ -127,7 +122,7 @@ def test(epoch):
             _, predicted = outputs.max(1)
             benign_correct += predicted.eq(targets).sum().item()
 
-            if batch_idx % 10 == 0:
+            if batch_idx % 50 == 0:
                 print('\nCurrent batch:', str(batch_idx))
                 print('Current benign test accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
                 print('Current benign test loss:', loss.item())
@@ -140,7 +135,7 @@ def test(epoch):
             _, predicted = adv_outputs.max(1)
             adv_correct += predicted.eq(targets).sum().item()
 
-            if batch_idx % 10 == 0:
+            if batch_idx % 50 == 0:
                 print('Current adversarial test accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
                 print('Current adversarial test loss:', loss.item())
 
@@ -157,23 +152,13 @@ def test(epoch):
     torch.save(state, './checkpoint/' + file_name)
     print('Model Saved!')
 
-def adjust_learning_rate(optimizer, epoch):
-    lr = learning_rate
-    if epoch >= 100:
-        lr /= 10
-    if epoch >= 150:
-        lr /= 10
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-
 if __name__ == '__main__':
     start_time = time.time()
 
-    for epoch in tqdm(range(0, 200)):
-        adjust_learning_rate(optimizer, epoch)
+    for epoch in range(0,60):
         train(epoch)
         test(epoch)
 
     end_time = time.time() - start_time
 
-    print(f"Time taken for 200 epochs = {end_time/3600} hours")
+    print(f"Time taken for 60 epochs of basic training = {end_time/60} minutes")

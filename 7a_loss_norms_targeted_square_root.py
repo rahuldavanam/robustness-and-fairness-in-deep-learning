@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim import lr_scheduler
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader, BatchSampler, Sampler
@@ -19,8 +20,9 @@ epsilon = 0.0314
 k = 7
 alpha = 0.00784
 batch_size_per_class = 9
+num_classes = 10
 
-file_name = 'pgd_targeted_adversarial_training'
+file_name = 'loss_norms_targeted_square_root'
 
 # CUDA agnostic code
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -55,7 +57,7 @@ class BalancedBatchSampler(Sampler):
                 indices = np.random.choice(self.class_indices[class_idx], self.batch_size_per_class, replace=False)
                 batch.extend(indices)
 
-            np.random.shuffle(batch)
+            #np.random.shuffle(batch)
             yield batch
             batch = []
 
@@ -66,11 +68,8 @@ train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download
 test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
 
 balanced_sampler = BalancedBatchSampler(train_dataset, batch_size_per_class)
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_sampler=balanced_sampler, num_workers=4)
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False, num_workers=4)
-
-# After defining train_loader
-# print(f"Number of batches: {len(balanced_sampler)}")
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_sampler=balanced_sampler, num_workers=1)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False, num_workers=1)
 
 # Implementation of targeted attack
 class LinfPGDTargetAttack(object):
@@ -78,7 +77,7 @@ class LinfPGDTargetAttack(object):
         self.model = model
 
     def perturb(self, x_natural, target_labels):  # Perturb - make someone unsettled or anxious
-        x = x_natural.detach()  # What does it do? It shouldn't propogarte back to x_nat
+        x = x_natural.detach()  
         x = x + torch.zeros_like(x).uniform_(-epsilon, epsilon)
         for i in range(k):
             x.requires_grad_()
@@ -108,22 +107,15 @@ def generate_target_labels(labels):
 
     return target_labels
 
-# Function where adversarial examples are created 
-def attack(x, y, model, adversary):  
-    model_copied = copy.deepcopy(model)
-    model_copied.eval()
-    adversary.model = model_copied
-    adv = adversary.perturb(x, y)
-    return adv
-
 net = ResNet18()
 net = net.to(device)
 net = torch.nn.DataParallel(net)
 cudnn.benchmark = True
 
 adversary = LinfPGDTargetAttack(net)
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss(reduction='none')
 optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=0.9, weight_decay=0.0002)
+scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[17, 32], gamma=0.1)
 
 def train(epoch):
     print('\n[ Train epoch: %d ]' % epoch)
@@ -133,35 +125,42 @@ def train(epoch):
     total = 0
     for batch_idx, (inputs, targets) in enumerate(train_loader):
         inputs, targets = inputs.to(device), targets.to(device)
+        loss = torch.zeros(num_classes).to(device)
+
         optimizer.zero_grad()
 
         target_labels = generate_target_labels(targets).to(device)
         adv = adversary.perturb(inputs, target_labels)
         adv_outputs = net(adv)
         
-        loss = criterion(adv_outputs, targets)
+        loss_tensor = criterion(adv_outputs, targets)
+        for i in range(num_classes):
+           loss[i] = torch.sqrt(torch.sum(loss_tensor[targets==i]))
+        loss = torch.mean(loss)
+        #print(loss)    
         loss.backward()
 
         optimizer.step()
         
-        train_loss += loss.item() # Converts tensor to python number
+        train_loss += loss.item()
         # We're interested in the indices where the max value is present along the 1st dimension (along classes)
         _, predicted = adv_outputs.max(1)  
 
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
         
-        if batch_idx % 15 == 0:
+        if batch_idx % 50 == 0:
             print('\nCurrent batch:', str(batch_idx))
             print('Current adversarial train accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
             print('Current adversarial train loss:', loss.item())
 
-    print(f"Total processed samples: {total}")
+    scheduler.step()   
     print('\nTotal adversarial train accuarcy:', 100. * correct / total)
     print('Total adversarial train loss:', train_loss)
 
 def test(epoch):
     print('\n[ Test epoch: %d ]' % epoch)
+
     net.eval()
     benign_loss = 0
     adv_loss = 0
@@ -172,34 +171,42 @@ def test(epoch):
         for batch_idx, (inputs, targets) in enumerate(test_loader):
             inputs, targets = inputs.to(device), targets.to(device)
             total += targets.size(0)
+            benign_loss_tensor = torch.zeros(num_classes).to(device)
+            adv_loss_tensor = torch.zeros(num_classes).to(device)
 
             benign_outputs = net(inputs)
-            loss = criterion(benign_outputs, targets)
-            benign_loss += loss.item()
+            loss_tensor = criterion(benign_outputs, targets)
+            for i in range(num_classes):
+                benign_loss_tensor[i] = torch.square(torch.sum(loss_tensor[targets==i]))
+            benign_loss_tensor = torch.mean(benign_loss_tensor)
+            benign_loss += benign_loss_tensor.item()
 
             _, predicted = benign_outputs.max(1)
             benign_correct += predicted.eq(targets).sum().item()
 
-            if batch_idx % 10 == 0:
+            if batch_idx % 50 == 0:
                 print('\nCurrent batch:', str(batch_idx))
                 print('Current benign test accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
-                print('Current benign test loss:', loss.item())
+                print('Current benign test loss:', benign_loss_tensor.item())
 
             target_labels = generate_target_labels(targets).to(device)
             adv = adversary.perturb(inputs, target_labels)
             adv_outputs = net(adv)
-            loss = criterion(adv_outputs, targets)
-            adv_loss += loss.item()
+            loss_tensor = criterion(adv_outputs, targets)
+            for i in range(num_classes):
+                adv_loss_tensor[i] = torch.square(torch.sum(loss_tensor[targets==i]))
+            adv_loss_tensor = torch.mean(adv_loss_tensor)
+            adv_loss += adv_loss_tensor.item()
 
             _, predicted = adv_outputs.max(1)
             adv_correct += predicted.eq(targets).sum().item()
 
-            if batch_idx % 10 == 0:
+            if batch_idx % 50 == 0:
                 print('Current adversarial test accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
-                print('Current adversarial test loss:', loss.item())
+                print('Current adversarial test loss:', adv_loss_tensor.item())
 
     print('\nTotal benign test accuarcy:', 100. * benign_correct / total)
-    print('Total adversarial test Accuarcy:', 100. * adv_correct / total)
+    print('Total adversarial test accuarcy:', 100. * adv_correct / total)
     print('Total benign test loss:', benign_loss)
     print('Total adversarial test loss:', adv_loss)
 
@@ -211,23 +218,12 @@ def test(epoch):
     torch.save(state, './checkpoint/' + file_name)
     print('Model Saved!')
 
-def adjust_learning_rate(optimizer, epoch):
-    lr = learning_rate
-    if epoch >= 100:
-        lr /= 10
-    if epoch >= 150:
-        lr /= 10
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-
-if __name__ == '__main__':        
+if __name__ == '__main__':
     start_time = time.time()
-
-    for epoch in range(0,20):
-        adjust_learning_rate(optimizer, epoch)
+    for epoch in range(0,60):
         train(epoch)
         test(epoch)
 
     end_time = time.time() - start_time
 
-    print(f"Time taken for 20 epochs = {end_time/3600} hours")
+    print(f"Time taken for 60 epochs for targeted square root loss = {end_time/60} minutes")

@@ -8,8 +8,10 @@ import torchvision.transforms as transforms
 from models import *
 from advertorch.attacks import LinfPGDAttack
 
-from torchmetrics import ConfusionMatrix
-from mlxtend.plotting import plot_confusion_matrix
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+import numpy as np
+import random
 
 learning_rate = 0.1
 epsilon = 0.0314
@@ -17,7 +19,7 @@ k = 7
 alpha = 0.00784
 batch_size_per_class = 9
 
-file_name = 'pgd_targeted_adversarial_training'
+file_name = 'loss_norms_targeted_square_root'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 transform_test = transforms.Compose([
@@ -33,7 +35,7 @@ class LinfPGDTargetAttack(object):
         self.model = model
 
     def perturb(self, x_natural, target_labels):  # Perturb - make someone unsettled or anxious
-        x = x_natural.detach()  # What does it do? It shouldn't propogarte back to x_nat
+        x = x_natural.detach()
         x = x + torch.zeros_like(x).uniform_(-epsilon, epsilon)
         for i in range(k):
             x.requires_grad_()
@@ -50,17 +52,13 @@ class LinfPGDTargetAttack(object):
 # Custom function to generate target labels for misclassification
 def generate_target_labels(labels):
     num_classes = 10
-    batch_size_per_class = 9
-    target_labels = torch.zeros_like(labels)
-
-    for class_idx in range(num_classes):
-        class_indices = (labels == class_idx).nonzero(as_tuple=True)[0]
+    target_labels = labels.clone().detach()
+    
+    for i in range(len(labels)):
         targets = list(range(num_classes))
-        targets.remove(class_idx)
-
-        for i, idx in enumerate(class_indices):
-            target_labels[idx] = targets[i % (num_classes - 1)]
-
+        targets.remove(labels[i].item())
+        target_labels[i] = random.choice(targets)
+        
     return target_labels
 
 net = ResNet18()
@@ -101,7 +99,7 @@ def test():
         y_pred.append(predicted.cpu())  # Move to CPU to avoid device mismatch later
         benign_correct += predicted.eq(targets).sum().item()
 
-        if batch_idx % 10 == 0:
+        if batch_idx % 20 == 0:
             print('\nCurrent batch:', str(batch_idx))
             print('Current benign test accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
             print('Current benign test loss:', loss.item())
@@ -117,7 +115,7 @@ def test():
         y_pred_target_adv.append(predicted.cpu())  # Move to CPU to avoid device mismatch later
         target_adv_correct += predicted.eq(targets).sum().item()
 
-        if batch_idx % 10 == 0:
+        if batch_idx % 20 == 0:
             print('Current adversarial test accuracy on targeted attacks:', str(predicted.eq(targets).sum().item() / targets.size(0)))
             print('Current adversarial test loss on targeted attacks:', loss.item())
 
@@ -131,7 +129,7 @@ def test():
         y_pred_untarget_adv.append(predicted.cpu())  # Move to CPU to avoid device mismatch later
         untarget_adv_correct += predicted.eq(targets).sum().item()
 
-        if batch_idx % 10 == 0:
+        if batch_idx % 20 == 0:
             print('Current adversarial test accuracy on untargeted attacks:', str(predicted.eq(targets).sum().item() / targets.size(0)))
             print('Current adversarial test loss on untargeted attacks:', loss.item())
 
@@ -142,45 +140,36 @@ def test():
     print('Total adversarial test loss on targeted attacks:', target_adv_loss)
     print('Total adversarial test loss on untargeted attacks:', untarget_adv_loss)
 
+def plot_confusion_matrix(true_labels, predicted_labels, classes, title, filename):
+    cm = confusion_matrix(true_labels, predicted_labels)
+    
+    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+    
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm_normalized, display_labels=classes)
+    plt.figure(figsize=(15, 10))
+    disp.plot(cmap=plt.cm.Blues, ax=plt.gca())
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.title(title)
+    plt.xticks(rotation=45, ha='right')
+    plt.savefig(filename, bbox_inches='tight')
+    plt.close()
+
 if __name__ == '__main__':
     test()
 
-    y_pred_tensor = torch.cat(y_pred).to(device)
-    y_pred_target_adv_tensor = torch.cat(y_pred_target_adv).to(device)
-    y_pred_untarget_adv_tensor = torch.cat(y_pred_untarget_adv).to(device)
+    y_pred_tensor = torch.cat(y_pred)
+    y_pred_target_adv_tensor = torch.cat(y_pred_target_adv)
+    y_pred_untarget_adv_tensor = torch.cat(y_pred_untarget_adv)
 
     class_names = test_dataset.classes
-    targets_tensor = torch.tensor(test_dataset.targets).to(device)
+    targets_tensor = torch.tensor(test_dataset.targets)
 
+    # Benign confusion matrix
+    plot_confusion_matrix(targets_tensor, y_pred_tensor, class_names, title="Confusion matrix of l0.5 loss targeted training on benign data", filename="Confusion_matrix_of_l0.5_loss_targeted_training_on_benign_data.png")
+    
+    # Untargeted confusion matrix
+    plot_confusion_matrix(targets_tensor, y_pred_untarget_adv_tensor, class_names, title="Confusion matrix of l0.5 loss targeted training on untargeted data", filename="Confusion_matrix_of_l0.5_loss_targeted_training_on_untargeted_data.png")
 
-    # Plottig a benign confusion matrix
-    confmat = ConfusionMatrix(task='multiclass', num_classes=len(class_names)).to(device)
-    confmat_tensor = confmat(preds=y_pred_tensor, target=targets_tensor)
-
-    fig, ax = plot_confusion_matrix(
-        conf_mat=confmat_tensor.cpu().numpy(), # matplotlib likes working with numpy
-        class_names=class_names,
-        figsize=(10, 7)
-    )
-
-    # Plotting an adversarial confusion matrix on targeted data
-    confmat_adv = ConfusionMatrix(task='multiclass', num_classes=len(class_names)).to(device)
-    confmat_adv_target_tensor = confmat_adv(preds=y_pred_target_adv_tensor,
-                                    target=targets_tensor)
-
-    fig, ax = plot_confusion_matrix(
-        conf_mat=confmat_adv_target_tensor.cpu().numpy(), # matplotlib likes working with numpy
-        class_names=class_names,
-        figsize=(10, 7)
-    )
-
-    # Plotting an adversarial confusion matric on untargeted data
-    confmat_adv = ConfusionMatrix(task='multiclass', num_classes=len(class_names)).to(device)
-    confmat_adv_tensor = confmat_adv(preds=y_pred_untarget_adv_tensor,
-                                    target=targets_tensor)
-
-    fig, ax = plot_confusion_matrix(
-        conf_mat=confmat_adv_tensor.cpu().numpy(), # matplotlib likes working with numpy
-        class_names=class_names,
-        figsize=(10, 7)
-    )
+    # Targeted confusion matrix
+    plot_confusion_matrix(targets_tensor, y_pred_target_adv_tensor, class_names, title="Confusion matrix of l0.5 loss targeted training on targeted data", filename="Confusion_matrix_of_l0.5_loss_targeted_training_on_targeted_data.png")

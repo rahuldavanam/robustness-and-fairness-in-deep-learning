@@ -1,6 +1,6 @@
 # Robustness and fairness in deep learning
 
-This code is mostly based on Dongbin Na's (https://github.com/ndb796) code with a few modifications to suit the requirements of my task. 
+This code is inspired by Dongbin Na's (https://github.com/ndb796) code and also uses his customized ResNet-18 model and his implementation of basic and untargeted training.
 
 ### To see the different phases of the project:
 * Run `basic_training.py` to conventionally train the model with benign data.
